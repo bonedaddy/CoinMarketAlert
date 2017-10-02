@@ -56,19 +56,33 @@ contract SafeMath {
 
 contract CoinMarketAlert is Owned, SafeMath {
 
-    address[]   public      alertCreators;
     address     public      payoutContractAddress;
     uint256     public      totalSupply;
     uint256     public      nextPayoutDay;
+    uint256     public      nextNextPayoutDay;
     uint256     public      weekNumber;
     uint256     public      creationBonus;
+    uint256     public      alertsCreated;
+    uint256     public      usersRegistered;
+    uint256     private     weekIDs;
     uint8       public      decimals;
     bytes20     public      weekIdentifierHash;
+    bytes20[]   public      weekIdentifierHashArray;
     string      public      name;
     string      public      symbol;
     bool        public      tokenTransfersFrozen;
     bool        public      tokenMintingEnabled;
 
+
+    struct AlertCreatorStruct {
+        address alertCreator;
+        uint256 alertsCreated;
+    }
+
+    AlertCreatorStruct[]   public      alertCreators;
+    
+    // Used to keep track of the AlertCreatorStruct IDs for a user
+    mapping (address => uint256) public alertCreatorId;
     // Alert Creator Entered (Used to prevetnt duplicates in creator array)
     mapping (address => bool) public userRegistered;
     // Tracks approval
@@ -79,6 +93,8 @@ contract CoinMarketAlert is Owned, SafeMath {
     mapping (address => mapping (bytes20 => uint256)) public pendingBalances;
     //[addr][week ID Hash][balance]
     mapping (address => mapping (bytes20 => uint256)) public paidBalances;
+    // Tracks Week Identifier Array Index to it's bytes20 ripemd hash
+    mapping (uint256 => bytes20) public weekHashArrayIndexTracker;
 
     event Transfer(address indexed _from, address indexed _to, uint256 _amount);
     event Approve(address indexed _owner, address indexed _spender, uint256 _amount);
@@ -95,16 +111,50 @@ contract CoinMarketAlert is Owned, SafeMath {
         tokenMintingEnabled = false;
     }
 
+    /// @notice Used to launch, enable token transfers and token minting, start week counting
+    function launchContract() onlyOwner returns (bool launched) {
+        tokenTransfersFrozen = false;
+        tokenMintingEnabled = true;
+        nextPayoutDay = now + 1 weeks;
+        nextNextPayoutDay = now + 2 weeks;
+        weekIdentifierHash = ripemd160(nextPayoutDay);
+        weekIdentifierHashArray.push(weekIdentifierHash);
+        weekIDs = 0;
+        weekHashArrayIndexTracker[0] = weekIdentifierHash;
+        EnableTokenMinting(true);
+        return true;
+    }
+
+    function payoutUsers(bytes20 _weekIdentifier) onlyOwner returns (bool paid) {
+        for (uint256 i = 0; i < alertCreators.length; i++) {
+            if (pendingBalances[alertCreators[i].alertCreator][_weekIdentifier] > 0) {
+                uint256 _amountPay = pendingBalances[alertCreators[i].alertCreator][_weekIdentifier];
+                pendingBalances[alertCreators[i].alertCreator][_weekIdentifier] = 0;
+                paidBalances[alertCreators[i].alertCreator][_weekIdentifier] = add(paidBalances[alertCreators[i].alertCreator][_weekIdentifier], _amountPay);
+                if (!alertCreators[i].alertCreator.send(_amountPay)) {
+                    revert();
+                }
+            }
+        }
+        return true;
+    }
 
     function registerUser(address _user) private returns (bool registered) {
-        alertCreators.push(_user);
+        usersRegistered = add(usersRegistered, 1);
+        AlertCreatorStruct memory acs;
+        acs.alertCreator = _user;
+        alertCreators.push(acs);
         userRegistered[_user] = true;
         return true;
     }
+
     function createAlert(address _creator) onlyOwner {
         if (now > nextPayoutDay) {
             nextPayoutDay = add(now, 1 weeks);
             weekIdentifierHash = ripemd160(nextPayoutDay);
+            weekIdentifierHashArray.push(weekIdentifierHash);
+            weekIDs = add(weekIDs, 1);
+            weekHashArrayIndexTracker[weekIDs] = weekIdentifierHash;
         }
         if (!userRegistered[_creator]) {
             // register user who hasn't been seen by the system 
@@ -112,17 +162,10 @@ contract CoinMarketAlert is Owned, SafeMath {
         }
         var p = pendingBalances[_creator][weekIdentifierHash];
         p = add(p, creationBonus);
+        alertsCreated = add(alertsCreated, 1);
     }
 
-    /// @notice Used to launch, enable token transfers and token minting, start week counting
-    function launchContract() onlyOwner returns (bool launched) {
-        tokenTransfersFrozen = false;
-        tokenMintingEnabled = true;
-        nextPayoutDay = now + 1 weeks;
-        weekIdentifierHash = ripemd160(nextPayoutDay);
-        EnableTokenMinting(true);
-        return true;
-    }
+
 
     /// @notice low-level minting function
     function tokenMint(address _invoker, uint256 _amount) private returns (bool raised) {
@@ -152,7 +195,7 @@ contract CoinMarketAlert is Owned, SafeMath {
         require(_receiver != address(0));
         require(sub(balances[_sender], _value) >= 0);
         require(add(balances[_receiver], _value) > balances[_receiver]);
-
+        return true;
     }
     /// @notice Used to transfer funds
     function transfer(address _receiver, uint256 _amount) {
@@ -187,10 +230,16 @@ contract CoinMarketAlert is Owned, SafeMath {
         require(_amount > 0);
         require(balances[msg.sender] > 0);
         allowance[msg.sender][_spender] = _amount;
+        return true;
     }
 
      //GETTERS//
     ///////////
+
+    /// @param _arrayIndex (starting at 0) the index ID of the array containing the ripemd week hashes
+    function lookupWeekIdentifier(uint256 _arrayIndex) constant returns (bytes20 _identifier) {
+        return weekIdentifierHashArray[_arrayIndex];
+    }
 
     /// @notice Used to retrieve total supply
     function totalSupply() constant returns (uint256 totalSupply) {
