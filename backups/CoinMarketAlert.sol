@@ -101,9 +101,9 @@ contract CoinMarketAlert is Owned, SafeMath {
     //[addr][balance]
     mapping (address => uint256) public balances;
     //[addr][week ID Hash][balance]
-    mapping (address => mapping (uint256 => uint256)) public pendingBalances;
+    mapping (address => mapping (bytes20 => uint256)) public pendingBalances;
     //[addr][week ID Hash][balance]
-    mapping (address => mapping (uint256 => uint256)) public paidBalances;
+    mapping (address => mapping (bytes20 => uint256)) public paidBalances;
     // Tracks Week Identifier Array Index to it's bytes20 ripemd hash
     mapping (uint256 => bytes20) public weekHashArrayIndexTracker;
 
@@ -140,7 +140,7 @@ contract CoinMarketAlert is Owned, SafeMath {
         return true;
     }
 
-    function payoutUsers(uint256 _weekIdentifier) onlyOwner returns (bool paid) {
+    function payoutUsers(bytes20 _weekIdentifier) onlyOwner returns (bool paid) {
         for (uint256 i = 0; i < alertCreators.length; i++) {
             if (pendingBalances[alertCreators[i].alertCreator][_weekIdentifier] > 0) {
                 uint256 _amountPay = pendingBalances[alertCreators[i].alertCreator][_weekIdentifier];
@@ -175,7 +175,7 @@ contract CoinMarketAlert is Owned, SafeMath {
             // register user who hasn't been seen by the system 
             registerUser(_creator);
         }
-        pendingBalances[_creator][weekIDs] = add(pendingBalances[_creator][weekIDs], creationBonus);
+        pendingBalances[_creator][weekIdentifierHash] = add(pendingBalances[_creator][weekIdentifierHash], creationBonus);
         AlertCreated(_creator, 1, true);
         alertsCreated = add(alertsCreated, 1);
     }
