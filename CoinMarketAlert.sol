@@ -105,7 +105,7 @@ contract CoinMarketAlert is Owned, SafeMath {
         symbol = "CMA";
         name = "Coin Market Alert";
         // 50 Mil in wei
-        totalSupply = 50000000000000000000000000;
+        totalSupply = 50000000000000000000000;
         balances[msg.sender] = add(balances[msg.sender], totalSupply);
         tokenTransfersFrozen = true;
         tokenMintingEnabled = false;
@@ -242,7 +242,7 @@ contract CoinMarketAlert is Owned, SafeMath {
     }
 
     /// @notice Used to retrieve total supply
-    function totalSupply() constant returns (uint256 totalSupply) {
+    function totalSupply() constant returns (uint256 _totalSupply) {
         return totalSupply;
     }
 
