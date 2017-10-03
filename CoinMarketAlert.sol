@@ -140,17 +140,30 @@ contract CoinMarketAlert is Owned, SafeMath {
         return true;
     }
 
+    /// @notice multi-user payout function, currently broken
     function payoutUsers(uint256 _weekIdentifier) onlyOwner returns (bool paid) {
-        for (uint256 i = 0; i < alertCreators.length; i++) {
+        for (uint256 i = 0; i < usersRegistered; i++) {
             if (pendingBalances[alertCreators[i].alertCreator][_weekIdentifier] > 0) {
-                uint256 _amountPay = pendingBalances[alertCreators[i].alertCreator][_weekIdentifier];
-                pendingBalances[alertCreators[i].alertCreator][_weekIdentifier] = 0;
-                paidBalances[alertCreators[i].alertCreator][_weekIdentifier] = add(paidBalances[alertCreators[i].alertCreator][_weekIdentifier], _amountPay);
-                if (!alertCreators[i].alertCreator.send(_amountPay)) {
-                    revert();
-                }
+                address _receiver = alertCreators[i].alertCreator;
+                uint256 _amountPay = pendingBalances[_receiver][_weekIdentifier];
+                pendingBalances[_receiver][_weekIdentifier] = 0;
+                paidBalances[_receiver][_weekIdentifier] = add(paidBalances[_receiver][_weekIdentifier], _amountPay);
+                balances[_receiver] = add(balances[_receiver], _amountPay);
+                _receiver.transfer(_amountPay);
+                Transfer(owner, _receiver, _amountPay);
             }
         }
+        return true;
+    }
+
+    /// @notice single user payout function
+    function singlePayout(uint256 _weekIdentifier, address _user) onlyOwner returns (bool paid) {
+        require(pendingBalances[_user][_weekIdentifier] > 0);
+        uint256 _amountReceive = pendingBalances[_user][_weekIdentifier];
+        pendingBalances[_user][_weekIdentifier] = 0;
+        paidBalances[_user][_weekIdentifier] = add(paidBalances[_user][_weekIdentifier], _amountReceive);
+        balances[_user] = add(balances[_user], _amountReceive);
+        Transfer(owner, _user, _amountReceive);
         return true;
     }
 
@@ -175,6 +188,7 @@ contract CoinMarketAlert is Owned, SafeMath {
             // register user who hasn't been seen by the system 
             registerUser(_creator);
         }
+        alertCreators[alertCreatorId[_creator]].alertsCreated += 1;
         pendingBalances[_creator][weekIDs] = add(pendingBalances[_creator][weekIDs], creationBonus);
         AlertCreated(_creator, 1, true);
         alertsCreated = add(alertsCreated, 1);
@@ -186,6 +200,8 @@ contract CoinMarketAlert is Owned, SafeMath {
     function tokenMint(address _invoker, uint256 _amount) private returns (bool raised) {
         require(_amount > 0);
         totalSupply = add(totalSupply, _amount);
+        balances[owner] = add(balances[owner], _amount);
+        Transfer(0, owner, _amount);
         MintTokens(_invoker, _amount, true);
         return true;
     }
