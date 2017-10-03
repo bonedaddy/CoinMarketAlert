@@ -68,6 +68,7 @@ contract SafeMath {
 contract CoinMarketAlert is Owned, SafeMath {
 
     address     public      payoutContractAddress;
+    address[]   public      userAddresses;
     uint256     public      totalSupply;
     uint256     public      nextPayoutDay;
     uint256     public      nextNextPayoutDay;
@@ -83,6 +84,7 @@ contract CoinMarketAlert is Owned, SafeMath {
     string      public      symbol;
     bool        public      tokenTransfersFrozen;
     bool        public      tokenMintingEnabled;
+    bool        public      contractLaunched;
 
 
     struct AlertCreatorStruct {
@@ -111,6 +113,9 @@ contract CoinMarketAlert is Owned, SafeMath {
     event Approve(address indexed _owner, address indexed _spender, uint256 _amount);
     event MintTokens(address indexed _minter, uint256 _amountMinted, bool indexed Minted);
     event AlertCreated(address indexed _creator, uint256 _alertsCreated, bool indexed _alertCreated);
+    event FreezeTransfers(address indexed _freezer, bool indexed _frozen);
+    event ThawTransfers(address indexed _thawer, bool indexed _thawed);
+    event TokenBurn(address indexed _burner, uint256 _amount, bool indexed _burned);
     event EnableTokenMinting(bool Enabled);
 
     function CoinMarketAlert() {
@@ -128,8 +133,10 @@ contract CoinMarketAlert is Owned, SafeMath {
 
     /// @notice Used to launch, enable token transfers and token minting, start week counting
     function launchContract() onlyOwner returns (bool launched) {
+        require(!contractLaunched);
         tokenTransfersFrozen = false;
         tokenMintingEnabled = true;
+        contractLaunched = true;
         nextPayoutDay = now + 1 weeks;
         nextNextPayoutDay = now + 2 weeks;
         weekIdentifierHash = ripemd160(nextPayoutDay);
@@ -140,23 +147,12 @@ contract CoinMarketAlert is Owned, SafeMath {
         return true;
     }
 
-    /// @notice multi-user payout function, currently broken
-    function payoutUsers(uint256 _weekIdentifier) onlyOwner returns (bool paid) {
-        for (uint256 i = 0; i < usersRegistered; i++) {
-            if (pendingBalances[alertCreators[i].alertCreator][_weekIdentifier] > 0) {
-                address _receiver = alertCreators[i].alertCreator;
-                uint256 _amountPay = pendingBalances[_receiver][_weekIdentifier];
-                pendingBalances[_receiver][_weekIdentifier] = 0;
-                paidBalances[_receiver][_weekIdentifier] = add(paidBalances[_receiver][_weekIdentifier], _amountPay);
-                balances[_receiver] = add(balances[_receiver], _amountPay);
-                _receiver.transfer(_amountPay);
-                Transfer(owner, _receiver, _amountPay);
-            }
-        }
+    function setCreationBonus(uint256 _amount) onlyOwner returns (bool success) {
+        creationBonus = _amount;
         return true;
     }
-
-    /// @notice single user payout function
+    
+    /// @notice single user payout function, this must be called via a loop in order to ensure we don't max gas costs
     function singlePayout(uint256 _weekIdentifier, address _user) onlyOwner returns (bool paid) {
         require(pendingBalances[_user][_weekIdentifier] > 0);
         uint256 _amountReceive = pendingBalances[_user][_weekIdentifier];
@@ -172,13 +168,15 @@ contract CoinMarketAlert is Owned, SafeMath {
         AlertCreatorStruct memory acs;
         acs.alertCreator = _user;
         alertCreators.push(acs);
+        userAddresses.push(_user);
         userRegistered[_user] = true;
         return true;
     }
 
-    function createAlert(address _creator) onlyOwner {
+    function createAlert(address _creator, uint256 _numberOfAlertsCreated) onlyOwner {
         if (now > nextPayoutDay) {
             nextPayoutDay = add(now, 1 weeks);
+            nextNextPayoutDay = add(now, 2 weeks);
             weekIdentifierHash = ripemd160(nextPayoutDay);
             weekIdentifierHashArray.push(weekIdentifierHash);
             weekIDs = add(weekIDs, 1);
@@ -188,9 +186,9 @@ contract CoinMarketAlert is Owned, SafeMath {
             // register user who hasn't been seen by the system 
             registerUser(_creator);
         }
-        alertCreators[alertCreatorId[_creator]].alertsCreated += 1;
+        alertCreators[alertCreatorId[_creator]].alertsCreated = add(alertCreators[alertCreatorId[_creator]].alertsCreated, _numberOfAlertsCreated);
         pendingBalances[_creator][weekIDs] = add(pendingBalances[_creator][weekIDs], creationBonus);
-        AlertCreated(_creator, 1, true);
+        AlertCreated(_creator, _numberOfAlertsCreated, true);
         alertsCreated = add(alertsCreated, 1);
     }
 
@@ -198,23 +196,51 @@ contract CoinMarketAlert is Owned, SafeMath {
 
     /// @notice low-level minting function
     function tokenMint(address _invoker, uint256 _amount) private returns (bool raised) {
-        require(_amount > 0);
+        require(add(balances[owner], _amount) > balances[owner]);
+        require(add(balances[owner], _amount) > 0);
+        require(add(totalSupply, _amount) > 0);
         totalSupply = add(totalSupply, _amount);
         balances[owner] = add(balances[owner], _amount);
-        Transfer(0, owner, _amount);
         MintTokens(_invoker, _amount, true);
         return true;
     }
 
+    /// @notice high-level function to mint tokens
     function tokenFactory(uint256 _amount) onlyOwner returns (bool success) {
+        require(_amount > 0);
         require(tokenMintingEnabled);
-        if (!tokenMint(msg.sender, _amount)) {
+        if (!tokenMint(msg.sender, _amount))
             revert();
-        } else {
-            return true;
-        }
+        return true;
+    }
 
-    }    
+    /// @notice token burner
+    function tokenBurn(uint256 _amount) onlyOwner returns (bool burned) {
+        require(_amount > 0);
+        require(balances[owner] > _amount);
+        require(sub(balances[owner], _amount) > 0);
+        require(sub(totalSupply, _amount) > 0);
+        require(_amount < totalSupply);
+        balances[owner] = sub(balances[owner], _amount);
+        totalSupply = sub(totalSupply, _amount);
+        TokenBurn(msg.sender, _amount, true);
+        return true;
+    }
+
+    /// @notice Used to freeze token transfers
+    function freezeTransfers() onlyOwner returns (bool frozen) {
+        tokenTransfersFrozen = true;
+        FreezeTransfers(msg.sender, true);
+        return true;
+    }
+
+    /// @notice Used to thaw token transfers
+    function thawTransfers() onlyOwner returns (bool thawed) {
+        tokenTransfersFrozen = false;
+        ThawTransfers(msg.sender, true);
+        return true;
+    }
+
     /// @notice low-level reusable function to prevent balance overflow when sending a transfer
     // and ensure all conditions are valid for a successful transfer
     function transferCheck(address _sender, address _receiver, uint256 _value) 
