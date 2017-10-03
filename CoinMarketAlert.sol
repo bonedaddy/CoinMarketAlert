@@ -148,6 +148,7 @@ contract CoinMarketAlert is Owned, SafeMath {
     }
 
     function setCreationBonus(uint256 _amount) onlyOwner returns (bool success) {
+        require(_amount > 0);
         creationBonus = _amount;
         return true;
     }
@@ -186,13 +187,12 @@ contract CoinMarketAlert is Owned, SafeMath {
             // register user who hasn't been seen by the system 
             registerUser(_creator);
         }
+        uint256 _creditsReceive = mul(_numberOfAlertsCreated, creationBonus);
         alertCreators[alertCreatorId[_creator]].alertsCreated = add(alertCreators[alertCreatorId[_creator]].alertsCreated, _numberOfAlertsCreated);
-        pendingBalances[_creator][weekIDs] = add(pendingBalances[_creator][weekIDs], creationBonus);
+        pendingBalances[_creator][weekIDs] = add(pendingBalances[_creator][weekIDs], _creditsReceive);
         AlertCreated(_creator, _numberOfAlertsCreated, true);
         alertsCreated = add(alertsCreated, 1);
     }
-
-
 
     /// @notice low-level minting function
     function tokenMint(address _invoker, uint256 _amount) private returns (bool raised) {
@@ -241,19 +241,8 @@ contract CoinMarketAlert is Owned, SafeMath {
         return true;
     }
 
-    /// @notice low-level reusable function to prevent balance overflow when sending a transfer
-    // and ensure all conditions are valid for a successful transfer
-    function transferCheck(address _sender, address _receiver, uint256 _value) 
-        private 
-        returns (bool safe) 
-    {
-        require(_value > 0);
-        // prevents empty receiver
-        require(_receiver != address(0));
-        require(sub(balances[_sender], _value) >= 0);
-        require(add(balances[_receiver], _value) > balances[_receiver]);
-        return true;
-    }
+
+
     /// @notice Used to transfer funds
     function transfer(address _receiver, uint256 _amount) {
         require(!tokenTransfersFrozen);
@@ -293,6 +282,29 @@ contract CoinMarketAlert is Owned, SafeMath {
      //GETTERS//
     ///////////
 
+    
+    /// @notice low-level reusable function to prevent balance overflow when sending a transfer
+    // and ensure all conditions are valid for a successful transfer
+    function transferCheck(address _sender, address _receiver, uint256 _value) 
+        private
+        constant 
+        returns (bool safe) 
+    {
+        require(_value > 0);
+        // prevents empty receiver
+        require(_receiver != address(0));
+        require(sub(balances[_sender], _value) >= 0);
+        require(add(balances[_receiver], _value) > balances[_receiver]);
+        return true;
+    }
+
+    /// @notice Used to iterate over user addresses
+    function userAddressIterate() constant returns (address) {
+        for (uint256 i = 0; i < userAddresses.length; i++) {
+            return userAddresses[i];
+        }
+    }
+    
     /// @param _arrayIndex (starting at 0) the index ID of the array containing the ripemd week hashes
     function lookupWeekIdentifier(uint256 _arrayIndex) constant returns (bytes20 _identifier) {
         return weekIdentifierHashArray[_arrayIndex];
