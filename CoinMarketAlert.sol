@@ -100,7 +100,7 @@ contract CoinMarketAlert is Owned, SafeMath {
         tokenMintingEnabled = false;
     }
 
-    /// @notice Used to launch, enable token transfers and token minting, start week counting
+    /// @notice Used to launch start the contract
     function launchContract() onlyOwner returns (bool launched) {
         require(!contractLaunched);
         tokenTransfersFrozen = false;
@@ -110,6 +110,7 @@ contract CoinMarketAlert is Owned, SafeMath {
         return true;
     }
     
+    /// @dev keeps a list of addresses that are participating in the site
     function registerUser(address _user) private returns (bool registered) {
         usersRegistered = add(usersRegistered, 1);
         AlertCreatorStruct memory acs;
@@ -120,8 +121,9 @@ contract CoinMarketAlert is Owned, SafeMath {
         return true;
     }
 
-    /// @notice single user payout function, this must be called via a loop 
-    /// in order to ensure we don't max gas costs. This loop must be initiated on the client side.
+    /// @notice Manual payout for site users
+    /// @param _user Ethereum address of the user
+    /// @param _amount The mount of CMA tokens in wei to send
     function singlePayout(address _user, uint256 _amount) onlyOwner returns (bool paid) {
         require(!tokenTransfersFrozen);
         require(_amount > 0);
@@ -135,18 +137,20 @@ contract CoinMarketAlert is Owned, SafeMath {
         return true;
     }
 
-    /// @notice low-level minting function
+    /// @dev low-level minting function not accessible externally
     function tokenMint(address _invoker, uint256 _amount) private returns (bool raised) {
         require(add(balances[owner], _amount) > balances[owner]);
         require(add(balances[owner], _amount) > 0);
         require(add(totalSupply, _amount) > 0);
+        require(add(totalSupply, _amount) > totalSupply);
         totalSupply = add(totalSupply, _amount);
         balances[owner] = add(balances[owner], _amount);
         MintTokens(_invoker, _amount, true);
         return true;
     }
 
-    /// @notice high-level function to mint tokens
+    /// @notice Used to mint tokens, only usable by the contract owner
+    /// @param _amount The amount of CMA tokens in wei to mint
     function tokenFactory(uint256 _amount) onlyOwner returns (bool success) {
         require(_amount > 0);
         require(tokenMintingEnabled);
@@ -155,7 +159,8 @@ contract CoinMarketAlert is Owned, SafeMath {
         return true;
     }
 
-    /// @notice token burner
+    /// @notice Used to burn tokens
+    /// @param _amount The amount of CMA tokens in wei to burn
     function tokenBurn(uint256 _amount) onlyOwner returns (bool burned) {
         require(_amount > 0);
         require(_amount < totalSupply);
@@ -182,9 +187,9 @@ contract CoinMarketAlert is Owned, SafeMath {
         return true;
     }
 
-
-
     /// @notice Used to transfer funds
+    /// @param _receiver The destination ethereum address
+    /// @param _amount The amount of CMA tokens in wei to send
     function transfer(address _receiver, uint256 _amount) {
         require(!tokenTransfersFrozen);
         if (transferCheck(msg.sender, _receiver, _amount)) {
@@ -198,6 +203,9 @@ contract CoinMarketAlert is Owned, SafeMath {
     }
 
     /// @notice Used to transfer funds on behalf of one person
+    /// @param _owner Person you are allowed to spend funds on behalf of
+    /// @param _receiver Person to receive the funds
+    /// @param _amount Amoun of CMA tokens in wei to send
     function transferFrom(address _owner, address _receiver, uint256 _amount) {
         require(!tokenTransfersFrozen);
         require(sub(allowance[_owner][msg.sender], _amount) >= 0);
@@ -213,6 +221,8 @@ contract CoinMarketAlert is Owned, SafeMath {
     }
 
     /// @notice Used to approve a third-party to send funds on your behalf
+    /// @param _spender The person you are allowing to spend on your behalf
+    /// @param _amount The amount of CMA tokens in wei they are allowed to spend
     function approve(address _spender, uint256 _amount) returns (bool approved) {
         require(_amount > 0);
         require(balances[msg.sender] > 0);
@@ -224,8 +234,10 @@ contract CoinMarketAlert is Owned, SafeMath {
     ///////////
 
     
-    /// @notice low-level reusable function to prevent balance overflow when sending a transfer
-    // and ensure all conditions are valid for a successful transfer
+    /// @dev low level function used to do a sanity check of input data for CMA token transfers
+    /// @param _sender This is the msg.sender, the person sending the CMA tokens
+    /// @param _receiver This is the address receiving the CMA tokens
+    /// @param _value This is the amount of CMA tokens in wei to send
     function transferCheck(address _sender, address _receiver, uint256 _value) 
         private
         constant 
@@ -239,13 +251,6 @@ contract CoinMarketAlert is Owned, SafeMath {
         return true;
     }
 
-    /// @notice Used to iterate over user addresses
-    function userAddressIterate() constant returns (address) {
-        for (uint256 i = 0; i < userAddresses.length; i++) {
-            return userAddresses[i];
-        }
-    }
-    
     /// @notice Used to retrieve total supply
     function totalSupply() constant returns (uint256 _totalSupply) {
         return totalSupply;
