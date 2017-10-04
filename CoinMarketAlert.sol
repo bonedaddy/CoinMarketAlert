@@ -227,6 +227,7 @@ contract CoinMarketAlert is Owned, SafeMath {
         require(_amount > 0);
         require(balances[msg.sender] > 0);
         allowance[msg.sender][_spender] = _amount;
+        Approve(msg.sender, _spender, _amount);
         return true;
     }
 
