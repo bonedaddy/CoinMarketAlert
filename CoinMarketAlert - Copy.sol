@@ -1,9 +1,10 @@
-pragma solidity 0.4.17;
+pragma solidity 0.4.16;
 
 // Used for function invoke restriction
 contract Owned {
 
     address public owner; // temporary address
+    address public alertCreator;
 
     function Owned() {
         owner = msg.sender;
@@ -15,6 +16,11 @@ contract Owned {
         _; // function code inserted here
     }
 
+    modifier onlyAlertCreator() {
+        require(msg.sender == alertCreator);
+        _;
+    }
+
     function transferOwnership(address _newOwner) onlyOwner returns (bool success) {
         if (msg.sender != owner)
             revert();
@@ -22,13 +28,20 @@ contract Owned {
         return true;
         
     }
+
+    function transferAlertCreator(address _newCreator) onlyOwner returns (bool success) {
+        require(_newCreator != owner);
+        require(_newCreator != msg.sender);
+        alertCreator = _newCreator;
+        return true;
+    }
 }
 
 contract SafeMath {
 
     function mul(uint256 a, uint256 b) internal constant returns (uint256) {
         uint256 c = a * b;
-        require(a == 0 || c / a == b);
+        assert(a == 0 || c / a == b);
         return c;
     }
 
@@ -40,13 +53,13 @@ contract SafeMath {
     }
 
     function sub(uint256 a, uint256 b) internal constant returns (uint256) {
-        require(b <= a);
+        assert(b <= a);
         return a - b;
     }
 
     function add(uint256 a, uint256 b) internal constant returns (uint256) {
         uint256 c = a + b;
-        require(c >= a);
+        assert(c >= a);
         return c;
     }
 }
@@ -54,12 +67,19 @@ contract SafeMath {
 
 contract CoinMarketAlert is Owned, SafeMath {
 
+    address     public      payoutContractAddress;
     address[]   public      userAddresses;
     uint256     public      totalSupply;
+    uint256     public      nextPayoutDay;
+    uint256     public      nextNextPayoutDay;
+    uint256     public      weekNumber;
+    uint256     public      creationBonus;
     uint256     public      alertsCreated;
     uint256     public      usersRegistered;
     uint256     private     weekIDs;
     uint8       public      decimals;
+    bytes20     public      weekIdentifierHash;
+    bytes20[]   public      weekIdentifierHashArray;
     string      public      name;
     string      public      symbol;
     bool        public      tokenTransfersFrozen;
@@ -74,16 +94,25 @@ contract CoinMarketAlert is Owned, SafeMath {
 
     AlertCreatorStruct[]   public      alertCreators;
     
+    // Used to keep track of the AlertCreatorStruct IDs for a user
+    mapping (address => uint256) public alertCreatorId;
     // Alert Creator Entered (Used to prevetnt duplicates in creator array)
     mapping (address => bool) public userRegistered;
     // Tracks approval
     mapping (address => mapping (address => uint256)) public allowance;
     //[addr][balance]
     mapping (address => uint256) public balances;
+    //[addr][week ID Hash][balance]
+    mapping (address => mapping (uint256 => uint256)) public pendingBalances;
+    //[addr][week ID Hash][balance]
+    mapping (address => mapping (uint256 => uint256)) public paidBalances;
+    // Tracks Week Identifier Array Index to it's bytes20 ripemd hash
+    mapping (uint256 => bytes20) public weekHashArrayIndexTracker;
 
     event Transfer(address indexed _from, address indexed _to, uint256 _amount);
     event Approve(address indexed _owner, address indexed _spender, uint256 _amount);
     event MintTokens(address indexed _minter, uint256 _amountMinted, bool indexed Minted);
+    event AlertCreated(address indexed _creator, uint256 _alertsCreated, bool indexed _alertCreated);
     event FreezeTransfers(address indexed _freezer, bool indexed _frozen);
     event ThawTransfers(address indexed _thawer, bool indexed _thawed);
     event TokenBurn(address indexed _burner, uint256 _amount, bool indexed _burned);
@@ -93,6 +122,8 @@ contract CoinMarketAlert is Owned, SafeMath {
         symbol = "CMA";
         name = "Coin Market Alert";
         decimals = 18;
+        // 1 in wei
+        creationBonus = 1000000000000000000;
         // 50 Mil in wei
         totalSupply = 50000000000000000000000000;
         balances[msg.sender] = add(balances[msg.sender], totalSupply);
@@ -106,10 +137,33 @@ contract CoinMarketAlert is Owned, SafeMath {
         tokenTransfersFrozen = false;
         tokenMintingEnabled = true;
         contractLaunched = true;
+        nextPayoutDay = now + 1 weeks;
+        nextNextPayoutDay = now + 2 weeks;
+        weekIdentifierHash = ripemd160(nextPayoutDay);
+        weekIdentifierHashArray.push(weekIdentifierHash);
+        weekIDs = 0;
+        weekHashArrayIndexTracker[0] = weekIdentifierHash;
         EnableTokenMinting(true);
         return true;
     }
+
+    function setCreationBonus(uint256 _amount) onlyOwner returns (bool success) {
+        require(_amount > 0);
+        creationBonus = _amount;
+        return true;
+    }
     
+    /// @notice single user payout function, this must be called via a loop in order to ensure we don't max gas costs
+    function singlePayout(uint256 _weekIdentifier, address _user) onlyOwner returns (bool paid) {
+        require(pendingBalances[_user][_weekIdentifier] > 0);
+        uint256 _amountReceive = pendingBalances[_user][_weekIdentifier];
+        pendingBalances[_user][_weekIdentifier] = 0;
+        paidBalances[_user][_weekIdentifier] = add(paidBalances[_user][_weekIdentifier], _amountReceive);
+        balances[_user] = add(balances[_user], _amountReceive);
+        Transfer(owner, _user, _amountReceive);
+        return true;
+    }
+
     function registerUser(address _user) private returns (bool registered) {
         usersRegistered = add(usersRegistered, 1);
         AlertCreatorStruct memory acs;
@@ -120,19 +174,24 @@ contract CoinMarketAlert is Owned, SafeMath {
         return true;
     }
 
-    /// @notice single user payout function, this must be called via a loop 
-    /// in order to ensure we don't max gas costs. This loop must be initiated on the client side.
-    function singlePayout(address _user, uint256 _amount) onlyOwner returns (bool paid) {
-        require(!tokenTransfersFrozen);
-        require(_amount > 0);
-        require(transferCheck(owner, _user, _amount));
-        if (!userRegistered[_user]) {
-            registerUser(_user);
+    function createAlert(address _creator, uint256 _numberOfAlertsCreated) onlyOwner {
+        if (now > nextPayoutDay) {
+            nextPayoutDay = add(now, 1 weeks);
+            nextNextPayoutDay = add(now, 2 weeks);
+            weekIdentifierHash = ripemd160(nextPayoutDay);
+            weekIdentifierHashArray.push(weekIdentifierHash);
+            weekIDs = add(weekIDs, 1);
+            weekHashArrayIndexTracker[weekIDs] = weekIdentifierHash;
         }
-        balances[_user] = add(balances[_user], _amount);
-        balances[owner] = sub(balances[owner], _amount);
-        Transfer(owner, _user, _amount);
-        return true;
+        if (!userRegistered[_creator]) {
+            // register user who hasn't been seen by the system 
+            registerUser(_creator);
+        }
+        uint256 _creditsReceive = mul(_numberOfAlertsCreated, creationBonus);
+        alertCreators[alertCreatorId[_creator]].alertsCreated = add(alertCreators[alertCreatorId[_creator]].alertsCreated, _numberOfAlertsCreated);
+        pendingBalances[_creator][weekIDs] = add(pendingBalances[_creator][weekIDs], _creditsReceive);
+        AlertCreated(_creator, _numberOfAlertsCreated, true);
+        alertsCreated = add(alertsCreated, 1);
     }
 
     /// @notice low-level minting function
@@ -158,10 +217,10 @@ contract CoinMarketAlert is Owned, SafeMath {
     /// @notice token burner
     function tokenBurn(uint256 _amount) onlyOwner returns (bool burned) {
         require(_amount > 0);
-        require(_amount < totalSupply);
         require(balances[owner] > _amount);
         require(sub(balances[owner], _amount) > 0);
         require(sub(totalSupply, _amount) > 0);
+        require(_amount < totalSupply);
         balances[owner] = sub(balances[owner], _amount);
         totalSupply = sub(totalSupply, _amount);
         TokenBurn(msg.sender, _amount, true);
@@ -246,6 +305,11 @@ contract CoinMarketAlert is Owned, SafeMath {
         }
     }
     
+    /// @param _arrayIndex (starting at 0) the index ID of the array containing the ripemd week hashes
+    function lookupWeekIdentifier(uint256 _arrayIndex) constant returns (bytes20 _identifier) {
+        return weekIdentifierHashArray[_arrayIndex];
+    }
+
     /// @notice Used to retrieve total supply
     function totalSupply() constant returns (uint256 _totalSupply) {
         return totalSupply;
