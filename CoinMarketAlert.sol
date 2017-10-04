@@ -1,4 +1,4 @@
-pragma solidity 0.4.17;
+pragma solidity 0.4.16;
 
 // Used for function invoke restriction
 contract Owned {
@@ -56,9 +56,7 @@ contract CoinMarketAlert is Owned, SafeMath {
 
     address[]   public      userAddresses;
     uint256     public      totalSupply;
-    uint256     public      alertsCreated;
     uint256     public      usersRegistered;
-    uint256     private     weekIDs;
     uint8       public      decimals;
     string      public      name;
     string      public      symbol;
