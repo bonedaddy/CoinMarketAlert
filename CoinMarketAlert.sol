@@ -46,7 +46,7 @@ contract CoinMarketAlert is Administration {
         decimals = 18;
         // 50 Mil in wei
         totalSupply = 50000000000000000000000000;
-        balances[msg.sender] = totalSupply;
+        balances[msg.sender] = 50000000000000000000000000;
         tokenTransfersFrozen = true;
         tokenMintingEnabled = false;
     }
