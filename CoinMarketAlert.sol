@@ -195,7 +195,7 @@ contract CoinMarketAlert is Administration {
         require(transferCheck(_owner, _receiver, _amount));
         balances[_owner] = balances[_owner].sub(_amount);
         balances[_receiver] = balances[_receiver].add(_amount);
-        allowance[_owner][_receiver] = allowance[_owner][_receiver].sub(_amount);
+        allowance[_owner][msg.sender] = allowance[_owner][msg.sender].sub(_amount);
         Transfer(_owner, _receiver, _amount);
         return true;
     }
