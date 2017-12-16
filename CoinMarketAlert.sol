@@ -32,7 +32,7 @@ contract CoinMarketAlert is Administration {
     mapping (address => uint256) public balances;
 
     event Transfer(address indexed _from, address indexed _to, uint256 _amount);
-    event Approve(address indexed _owner, address indexed _spender, uint256 _amount);
+    event Approval(address indexed _owner, address indexed _spender, uint256 _amount);
     event MintTokens(address indexed _minter, uint256 _amountMinted, bool indexed Minted);
     event FreezeTransfers(address indexed _freezer, bool indexed _frozen);
     event ThawTransfers(address indexed _thawer, bool indexed _thawed);
@@ -195,7 +195,7 @@ contract CoinMarketAlert is Administration {
         require(transferCheck(_owner, _receiver, _amount));
         balances[_owner] = balances[_owner].sub(_amount);
         balances[_receiver] = balances[_receiver].add(_amount);
-        allowance[_owner][_receiver] = allowance[_owner][_receiver].sub(_amount);
+        allowance[_owner][msg.sender] = allowance[_owner][msg.sender].sub(_amount);
         Transfer(_owner, _receiver, _amount);
         return true;
     }
@@ -210,7 +210,7 @@ contract CoinMarketAlert is Administration {
         require(_amount > 0);
         require(balances[msg.sender] > 0);
         allowance[msg.sender][_spender] = _amount;
-        Approve(msg.sender, _spender, _amount);
+        Approval(msg.sender, _spender, _amount);
         return true;
     }
 
